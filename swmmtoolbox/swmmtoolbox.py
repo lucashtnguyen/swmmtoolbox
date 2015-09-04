@@ -11,6 +11,14 @@ import struct
 import datetime
 import os
 
+# For now to preserve overall structure, will parse
+# dataframe from string in useful functions
+# will eventuall make pandas native data structures
+if sys.version_info[0] < 3:
+    from StringIO import StringIO
+else:
+    from io import StringIO
+
 import mando
 import pandas as pd
 from six.moves import range
@@ -95,9 +103,14 @@ FLOWUNITS = {
     }
 
 
-class SwmmExtract():
+class _SwmmExtract():
     def __init__(self, filename):
+        """
+        Class to read SWMM binary file.
 
+        Requires:
+            filename: path to '*.out' file.
+        """
         self.RECORDSIZE = 4
 
         self.fp = open(filename, 'rb')
@@ -311,45 +324,55 @@ class SwmmExtract():
 
 
 @mando.command
-def catalog(filename, itemtype=''):
-    ''' List the catalog of objects in output file
+def catalog(filename, itemtype=None):
+    """
+    Lists the catalog of objects in the output file.
 
-    :param filename: Filename of SWMM output file.
-    '''
-    obj = SwmmExtract(filename)
-    if itemtype:
+    Requires:
+        filename: str, path of SWMM `*.out` output file.
+    Optional:
+        itemtype: str, SWMM variable such as `node`, `link`, or `subcatchment`.
+    """
+    obj = _SwmmExtract(filename)
+
+    mapped = {obj.itemlist[a]:b for a, b in obj.names.items()}
+    if itemtype is not None:
         typenumber = obj.TypeCheck(itemtype)
-        plist = [typenumber]
+
+        return mapped[itemtype]
     else:
-        plist = list(range(len(obj.itemlist)))
-    print('TYPE, NAME')
-    for i in plist:
-        for oname in obj.names[i]:
-            print('{0},{1}'.format(obj.itemlist[i], oname))
+        return mapped
 
 
 @mando.command
-def listdetail(filename, itemtype, name=''):
-    ''' List nodes and metadata in output file
+def listdetail(filename, itemtype, name=None):
+    """
+    List nodes and metadata in output file
 
-    :param filename: Filename of SWMM output file.
-    :param itemtype: Type to print out the table of
-        (subcatchment, node, or link)
-    :param name: Optional specfic name to print only that entry.
-    '''
-    obj = SwmmExtract(filename)
+    Requires:
+        filename: Filename of SWMM output file.
+        itemtype: Type to print out the table of
+            (subcatchment, node, or link)
+        name: Optional specfic name to print only that entry.
+    """
+    obj = _SwmmExtract(filename)
     typenumber = obj.TypeCheck(itemtype)
-    if name:
+
+    finalstr = ''
+
+    if name is not None:
         objectlist = [obj.NameCheck(itemtype, name)[0]]
     else:
         objectlist = obj.names[typenumber]
     propnumbers = obj.propcode[typenumber]
-    headstr = ['#Name'] + [PROPCODE[typenumber][i] for i in propnumbers]
+    headstr = ['Name'] + [PROPCODE[typenumber][i] for i in propnumbers]
     headfmtstr = '{0:<25},{1:<8},' + ','.join(
         ['{'+str(i)+':>10}' for i in range(2, 1+len(propnumbers))])
-    print(headfmtstr.format(*tuple(headstr)))
+    headfmtstr += '\n'
+    finalstr += (headfmtstr.format(*tuple(headstr)))
     fmtstr = '{0:<25},{1:<8},' + ','.join(
         ['{'+str(i)+':10.2f}' for i in range(2, 1+len(propnumbers))])
+    fmtstr += '\n'
     for i, oname in enumerate(objectlist):
         printvar = [oname]
         for j in obj.prop[typenumber][i]:
@@ -357,18 +380,20 @@ def listdetail(filename, itemtype, name=''):
                 printvar.append(TYPECODE[typenumber][j[1]])
             else:
                 printvar.append(j[1])
-        print(fmtstr.format(*tuple(printvar)))
-
+        finalstr += fmtstr.format(*tuple(printvar))
+    return pd.read_csv(StringIO(finalstr), sep=',')
 
 @mando.command
 def listvariables(filename):
-    ''' List variables available for each type
+    """ List variables available for each type
         (subcatchment, node, link, pollutant, system)
 
-    :param filename: Filename of SWMM output file.
-    '''
-    obj = SwmmExtract(filename)
-    print('TYPE, DESCRIPTION, VARINDEX')
+    Requires:
+        filename: Filename of SWMM output file.
+    """
+    finalstr = ''
+    obj = _SwmmExtract(filename)
+    finalstr += ('TYPE, DESCRIPTION, VARINDEX\n')
     # 'pollutant' really isn't it's own itemtype
     # but part of subcatchment, node, and link...
     for itemtype in ['subcatchment', 'node', 'link', 'system']:
@@ -380,18 +405,22 @@ def listvariables(filename):
         VARCODE[typenumber].update(ndict)
         for i in obj.vars[typenumber]:
             try:
-                print('{0},{1},{2}'.format(itemtype,
+                finalstr += ('{0},{1},{2}\n'.format(itemtype,
                                            VARCODE[typenumber][i].decode(),
                                            i))
-            except (TypeError, AttributeError):
-                print('{0},{1},{2}'.format(itemtype,
+            except (TypeError, AttributeError, KeyError):
+                try:
+                    finalstr += ('{0},{1},{2}\n'.format(itemtype,
                                            str(VARCODE[typenumber][i]),
                                            str(i)))
+                except (KeyError):
+                    pass
+    return pd.read_csv(StringIO(finalstr), sep=',')
 
 
 @mando.command
 def stdtoswmm5(start_date=None, end_date=None, input_ts='-'):
-    ''' Take the toolbox standard format and return SWMM5 format.
+    """ Take the toolbox standard format and return SWMM5 format.
 
     Toolbox standard:
     Datetime, Column_Name
@@ -411,7 +440,7 @@ def stdtoswmm5(start_date=None, end_date=None, input_ts='-'):
         'None' for beginning.
     :param end_date: The end_date of the series in ISOdatetime format, or
         'None' for end.
-    '''
+    """
     import csv
     sys.tracebacklimit = 1000
     tsd = tsutils.read_iso_ts(input_ts)[start_date:end_date]
@@ -433,63 +462,104 @@ def stdtoswmm5(start_date=None, end_date=None, input_ts='-'):
 
 
 @mando.command
-def getdata(filename, *labels):
-    ''' DEPRECATED: Use 'extract' instead.
-    '''
-    return extract(filename, *labels)
+def extract(filename, itemtype, name, variableindex):
+    """
+    Get the time series data for a particular object and variable
 
+    Requires:
+        filename: Filename of SWMM output file.
+        itemtype: a SWMM variable type, such as `node`
+        name: the variable name in SWMM, such as the node name
+        variableindex: int, corresponds to a variable number.
+            Can be retrieved with swmmtoolbox.listvariables
+    """
+    obj = _SwmmExtract(filename)
+    typenumber = obj.TypeCheck(itemtype)
+    if itemtype != 'system':
+        name = obj.NameCheck(itemtype, name)[0]
 
-@mando.command
-def extract(filename, *labels):
-    ''' Get the time series data for a particular object and variable
+    # This is the band-aid for correctly reading in
+    # pollutants... replace with something cleaner...
+    start = len(VARCODE[typenumber])
+    end = start + len(obj.names[3])
+    nlabels = list(range(start, end))
+    ndict = dict(list(zip(nlabels, obj.names[3])))
+    VARCODE[typenumber].update(ndict)
 
-    :param filename: Filename of SWMM output file.
-    :param labels: The remaining arguments uniquely identify a time-series
-        in the binary file.  The format is
-        'TYPE,NAME,VARINDEX'.
-        For example: 'node,C64,1 node,C63,1 ...'
-        TYPE and NAME can be retrieved with
-            'swmmtoolbox list filename.out'
-        VARINDEX can be retrieved with
-            'swmmtoolbox listvariables filename.out'
-    '''
-    obj = SwmmExtract(filename)
-    for label in labels:
-        itemtype, name, variableindex = label.split(',')
-        typenumber = obj.TypeCheck(itemtype)
-        if itemtype != 'system':
-            name = obj.NameCheck(itemtype, name)[0]
-
-        # This is the band-aid for correctly reading in
-        # pollutants... replace with something cleaner...
-        start = len(VARCODE[typenumber])
-        end = start + len(obj.names[3])
-        nlabels = list(range(start, end))
-        ndict = dict(list(zip(nlabels, obj.names[3])))
-        VARCODE[typenumber].update(ndict)
-
-        begindate = datetime.datetime(1899, 12, 30)
-        dates = []
-        values = []
-        for time in range(obj.nperiods):
-            date, value = obj.GetSwmmResults(
-                typenumber, name, int(variableindex), time)
-            days = int(date)
-            seconds = (date - days)*86400
-            date = begindate + datetime.timedelta(
-                days=days, seconds=seconds)
-            dates.append(date)
-            values.append(value)
-        jtsd = pd.DataFrame(
-            pd.Series(values, index=dates),
-            columns=['{0}_{1}_{2}'.format(
-                itemtype, name, VARCODE[typenumber][int(variableindex)])])
-        try:
-            result = result.join(jtsd)
-        except NameError:
-            result = jtsd
+    begindate = datetime.datetime(1899, 12, 30)
+    dates = []
+    values = []
+    for time in range(obj.nperiods):
+        date, value = obj.GetSwmmResults(
+            typenumber, name, int(variableindex), time)
+        days = int(date)
+        seconds = (date - days)*86400
+        date = begindate + datetime.timedelta(
+            days=days, seconds=seconds)
+        dates.append(date)
+        values.append(value)
+    jtsd = pd.DataFrame(
+        pd.Series(values, index=dates),
+        columns=['{0}_{1}_{2}'.format(
+            itemtype, name, VARCODE[typenumber][int(variableindex)])])
+    try:
+        result = result.join(jtsd)
+    except NameError:
+        result = jtsd
     return tsutils.printiso(result)
 
+
+class Outreader(object):
+    """
+    A class to evaluate the model results stored in the SWMM `*.out` file.
+    """
+    def __init__(self, filename):
+        self.filename = filename
+
+        self._variables = None
+        self._variableindex = None
+
+    @property
+    def variables(self):
+        """
+        Lists the catalog of objects in the output file.
+        """
+        if self._variables is None:
+            self._variables = catalog(self.filename)
+        return self._variables
+
+    @property
+    def variableindex(self):
+        """
+        List variables available for each type: subcatchment, node,
+            link, pollutant, system.
+        """
+        if self._variableindex is None:
+            self._variableindex = listvariables(self.filename)
+        return self._variableindex
+
+    def paramdetails(self, itemtype, name=None):
+        """
+        List nodes and metadata in output file
+
+        Requires:
+            itemtype: Type to print out the table of
+                (subcatchment, node, or link)
+            name: Optional specfic name to print only that entry.
+        """
+        return listdetail(self.filename, itemtype, name)
+
+    def results(self, itemtype, name, variableindex):
+        """
+        Get the time series data for a particular object and variable
+
+        Requires:
+            itemtype: a SWMM variable type, such as `node`
+            name: the variable name in SWMM, such as the node name
+            variableindex: int, corresponds to a variable number.
+                Can be retrieved with Outreader.listvariables
+        """
+        return extract(self.filename, itemtype, name, variableindex)
 
 def main():
     if not os.path.exists('debug_swmmtoolbox'):
