@@ -113,7 +113,9 @@ class _SwmmExtract():
         """
         self.RECORDSIZE = 4
 
-        self.fp = open(filename, 'rb')
+        self.filename = filename
+
+        self.openfp
 
         self.fp.seek(-6*self.RECORDSIZE, 2)
 
@@ -265,6 +267,16 @@ class _SwmmExtract():
             self.nlinks*self.nlinkvars +
             self.nsystemvars)
 
+        self.closefp
+
+    @property
+    def openfp(self):
+        self.fp = open(self.filename, 'rb')
+
+    @property
+    def closefp(self):
+        self.fp.close()
+
     def TypeCheck(self, itemtype):
         if itemtype in [0, 1, 2, 3, 4]:
             return itemtype
@@ -293,6 +305,7 @@ class _SwmmExtract():
 
         date_offset = self.ResultsStartPos + period*self.bytesperperiod
 
+        self.openfp
         self.fp.seek(date_offset, 0)
         date = struct.unpack('d', self.fp.read(2*self.RECORDSIZE))[0]
 
@@ -320,6 +333,7 @@ class _SwmmExtract():
 
         self.fp.seek(offset, 0)
         value = struct.unpack('f', self.fp.read(self.RECORDSIZE))[0]
+        self.closefp
         return (date, value)
 
 

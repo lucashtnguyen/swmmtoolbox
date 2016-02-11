@@ -1,1 +1,1 @@
-from swmmtoolbox import swmmtoolbox
+from swmmtoolbox import *
