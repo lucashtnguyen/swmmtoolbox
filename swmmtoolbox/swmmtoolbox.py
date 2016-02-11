@@ -519,6 +519,8 @@ class Outreader(object):
         self._variables = None
         self._variableindex = None
 
+        self._Se = _SwmmExtract(filename)
+
     @property
     def variables(self):
         """
@@ -560,6 +562,7 @@ class Outreader(object):
                 Can be retrieved with Outreader.listvariables
         """
         return extract(self.filename, itemtype, name, variableindex)
+
 
 def main():
     if not os.path.exists('debug_swmmtoolbox'):

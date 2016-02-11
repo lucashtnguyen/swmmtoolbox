@@ -1,1 +1,1 @@
-from swmmtoolbox import (Outreader, catalog, listvariables, listdetail, extract)
+from .swmmtoolbox import (Outreader, catalog, listvariables, listdetail, extract)
