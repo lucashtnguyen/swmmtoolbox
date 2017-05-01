@@ -346,6 +346,57 @@ class _SwmmExtract():
 
         return (date, value)
 
+    def GetSwmmArray(self, itemtype, name, variableindex):
+        if itemtype not in [0, 1, 2, 4]:
+            print('Type must be one of subcatchment, node. link, or system')
+            sys.exit(1)
+
+        def find_offset(date_offset):
+            offset = date_offset + 2*self.RECORDSIZE  # skip the date
+
+            if itemtype == 0:
+                offset = offset + self.RECORDSIZE*(
+                    itemindex*self.nsubcatchvars)
+            if itemtype == 1:
+                offset = offset + self.RECORDSIZE*(
+                    self.nsubcatch*self.nsubcatchvars +
+                    itemindex*self.nnodevars)
+            elif itemtype == 2:
+                offset = offset + self.RECORDSIZE*(
+                    self.nsubcatch*self.nsubcatchvars +
+                    self.nnodes*self.nnodevars +
+                    itemindex*self.nlinkvars)
+            elif itemtype == 4:
+                offset = offset + self.RECORDSIZE*(
+                    self.nsubcatch*self.nsubcatchvars +
+                    self.nnodes*self.nnodevars +
+                    self.nlinks*self.nlinkvars)
+
+            offset = offset + self.RECORDSIZE*variableindex
+
+            return offset
+
+
+        itemtype = self.TypeCheck(itemtype)
+
+        itemname, itemindex = self.NameCheck(itemtype, name)
+
+        date_offset = self.ResultsStartPos
+
+        self.openfp
+        self.fp.seek(date_offset, 0)
+        all_bytes = self.fp.read(self.bytesperperiod*self.nperiods)
+
+        dates = []
+        values = []
+        for n in range(self.nperiods):
+            which_period = self.bytesperperiod * n
+            offset = find_offset(which_period)
+            dates.append(struct.unpack('d', all_bytes[0 + which_period: 8 + which_period])[0])
+            values.append(struct.unpack('f', all_bytes[offset: 4 + offset])[0])
+
+        return (dates, values)
+
 
 @mando.command
 def catalog(filename, itemtype=None):
@@ -510,18 +561,11 @@ def extract(filename, itemtype, name, variableindex):
     ndict = dict(list(zip(nlabels, obj.names[3])))
     VARCODE[typenumber].update(ndict)
 
-    begindate = datetime.datetime(1899, 12, 30)
-    dates = []
-    values = []
-    for time in tqdm(range(obj.nperiods), leave=False, mininterval=10):
-        date, value = obj.GetSwmmResults(
-            typenumber, name, int(variableindex), time)
-        days = int(date)
-        seconds = (date - days)*86400
-        date = begindate + datetime.timedelta(
-            days=days, seconds=seconds)
-        dates.append(date)
-        values.append(value)
+    begindate = pd.Timestamp('1899-12-30')
+    ndates, values = obj.GetSwmmArray(
+        typenumber, name, int(variableindex))
+
+    dates = [begindate + pd.Timedelta(_, unit='d') for _ in ndates]
     jtsd = pd.DataFrame(
         pd.Series(values, index=dates),
         columns=['{0}_{1}_{2}'.format(
@@ -531,6 +575,8 @@ def extract(filename, itemtype, name, variableindex):
     except NameError:
         result = jtsd
     return tsutils.printiso(result)
+
+
 
 
 class Outreader(object):
