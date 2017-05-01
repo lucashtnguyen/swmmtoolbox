@@ -11,6 +11,8 @@ import struct
 import datetime
 import os
 
+from tqdm import tqdm
+
 # For now to preserve overall structure, will parse
 # dataframe from string in useful functions
 # will eventuall make pandas native data structures
@@ -104,13 +106,16 @@ FLOWUNITS = {
 
 
 class _SwmmExtract():
-    def __init__(self, filename):
+    def __init__(self, filename, keepfileopen=False):
         """
         Class to read SWMM binary file.
 
         Requires:
             filename: path to '*.out' file.
         """
+        self._isopen = False
+        self.keepfileopen = keepfileopen
+
         self.RECORDSIZE = 4
 
         self.filename = filename
@@ -267,11 +272,13 @@ class _SwmmExtract():
             self.nlinks*self.nlinkvars +
             self.nsystemvars)
 
-        self.closefp
+        if not self.keepfileopen:
+            self.closefp
 
     @property
     def openfp(self):
-        self.fp = open(self.filename, 'rb')
+        if not self._isopen:
+            self.fp = open(self.filename, 'rb')
 
     @property
     def closefp(self):
@@ -333,7 +340,10 @@ class _SwmmExtract():
 
         self.fp.seek(offset, 0)
         value = struct.unpack('f', self.fp.read(self.RECORDSIZE))[0]
-        self.closefp
+
+        if not self.keepfileopen:
+            self.closefp
+
         return (date, value)
 
 
@@ -503,7 +513,7 @@ def extract(filename, itemtype, name, variableindex):
     begindate = datetime.datetime(1899, 12, 30)
     dates = []
     values = []
-    for time in range(obj.nperiods):
+    for time in tqdm(range(obj.nperiods), leave=False, mininterval=10):
         date, value = obj.GetSwmmResults(
             typenumber, name, int(variableindex), time)
         days = int(date)
@@ -527,13 +537,13 @@ class Outreader(object):
     """
     A class to evaluate the model results stored in the SWMM `*.out` file.
     """
-    def __init__(self, filename):
+    def __init__(self, filename, keepfileopen=False):
         self.filename = filename
 
         self._variables = None
         self._variableindex = None
 
-        self._Se = _SwmmExtract(filename)
+        self._Se = _SwmmExtract(filename, keepfileopen=keepfileopen)
 
     @property
     def variables(self):
